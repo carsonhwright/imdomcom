@@ -27,6 +27,21 @@ def gauss_blur(img, ksize:int=5):
     ret = cv.GaussianBlur(img, (ksize, ksize), 0)
     return ret
     
+def remove_thin_lines(img, kernel_size=3, dark_lines=False):
+    """
+    Erase thin line-like artifacts (anything no thicker than kernel_size px)
+    from img via a morphological close/open pass, leaving larger features
+    intact.
+
+    dark_lines=True removes lines darker than their surroundings (closing,
+    e.g. scratches/grid lines on a lighter background); set False to remove
+    lines brighter than their surroundings (opening) instead.
+    """
+    kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (kernel_size, kernel_size))
+    op = cv.MORPH_CLOSE if dark_lines else cv.MORPH_OPEN
+    ret = cv.morphologyEx(img, op, kernel)
+    return ret
+
 def crop_hole(image, interior_frame, exterior_frame):
     """return a cropped version of the image using the exterior frame, and blanking the interior of the image"""
 
