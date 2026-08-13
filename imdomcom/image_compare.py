@@ -16,6 +16,8 @@ def setup_args():
     return args
 
 def main(img1=IMAGES_FP / "image1.png", img2=IMAGES_FP / "image2.png"):
+    assert_existence(img1)
+    assert_existence(img2)
     im1 = cv.imread(img1)
     im2 = cv.imread(img2)
     im1 = convert_to_gray(im1)
@@ -27,6 +29,9 @@ def main(img1=IMAGES_FP / "image1.png", img2=IMAGES_FP / "image2.png"):
     out = gauss_blur(out, GAUSSIAN_KERNEL_SIZE)
     write_im_output("wunk.png", out)
     return out
+
+def assert_existence(file):
+    assert Path(file).exists()
 
 def gauss_blur(img, ksize:int=5):
     # TODO kernel is 5x5, scale or kernel should be this value
