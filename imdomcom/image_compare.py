@@ -2,14 +2,22 @@ import cv2 as cv
 import numpy as np
 from pathlib import Path
 from cv2.typing import MatLike
+import argparse
 
 IMAGES_FP = Path(Path.home() / "project-files/images")
 OUTPUT = Path(__file__).parent.parent / "output"
-GAUSSIAN_KERNEL_SIZE = 7
+GAUSSIAN_KERNEL_SIZE = 15
 
-def main():
-    im1 = cv.imread(IMAGES_FP / "image1.png")
-    im2 = cv.imread(IMAGES_FP / "image2.png")
+def setup_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("first_image", help="Image that image 2 will be compared to")
+    parser.add_argument("second_image", help="Image that image 1 will be compared to")
+    args = parser.parse_args()
+    return args
+
+def main(img1=IMAGES_FP / "image1.png", img2=IMAGES_FP / "image2.png"):
+    im1 = cv.imread(img1)
+    im2 = cv.imread(img2)
     im1 = convert_to_gray(im1)
     im2 = convert_to_gray(im2)
     im1 = crop_image_gui(im1)
@@ -24,7 +32,9 @@ def gauss_blur(img, ksize:int=5):
     # TODO kernel is 5x5, scale or kernel should be this value
     # kernel = np.ones((ksize,ksize),np.float32)/(ksize**2) # scale squared
     # ret = cv.filter2D(img, cv.CV_8U, kernel)
-    ret = cv.GaussianBlur(img, (ksize, ksize), 0)
+    # Convert to CV_32F for Gaussian blur if needed
+    img_32f = img.astype(np.float32) if img.dtype == np.float16 else img
+    ret = cv.GaussianBlur(img_32f, (ksize, ksize), 0)
     return ret
     
 def remove_thin_lines(img, kernel_size=3, dark_lines=False):
@@ -49,7 +59,11 @@ def blank_interior(image, interior_frame):
     """what it sounds like"""
 
 def diff_img(img1, img2):
-    diff_img = img1 - img2
+    # Normalize both images to [0, 255] range before subtracting
+    img1_norm = cv.normalize(img1.astype(np.float32), None, alpha=0, beta=255, norm_type=cv.NORM_MINMAX)
+    img2_norm = cv.normalize(img2.astype(np.float32), None, alpha=0, beta=255, norm_type=cv.NORM_MINMAX)
+
+    diff_img = img1_norm - img2_norm
     min, max, mean, std_dev = image_stats(diff_img)
     divisor = max - min
     if not divisor:
@@ -62,6 +76,9 @@ def diff_img(img1, img2):
     # ret = cv.normalize(diff_img, None, beta=0, alpha=1, norm_type=cv.NORM_MINMAX, dtype=cv.CV_16F)*std_dev + mean
     # ret = np.clip(norm_diff, 0, 255)
     ret = abs(diff_img)
+    # ret = median_filter(ret, GAUSSIAN_KERNEL_SIZE)
+    ret = threshold_noise(ret, 20)
+    # ret = bilateral_filter(ret)
     return ret
 
 def image_stats(image):
@@ -75,6 +92,16 @@ def image_stats(image):
 def convert_to_gray(img):
     ret = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
     return ret
+
+def median_filter(img, ksize=5):
+    return cv.medianBlur(img.astype(np.uint8), ksize)
+
+def threshold_noise(img, threshold=10):
+    img[img < threshold] = 0
+    return img
+
+def bilateral_filter(img, d=9, sigma_color=75, sigma_space=75):
+    return cv.bilateralFilter(img.astype(np.uint8), d, sigma_color, sigma_space)
 
 def write_im_output(fn, img):
     cv.imwrite(OUTPUT / fn, img)
@@ -173,4 +200,5 @@ def match_sizes(image1:MatLike, image2:MatLike):
     breakpoint()
 
 if __name__ == "__main__":
-    main()
+    args = setup_args()
+    main(args.first_image, args.second_image)
