@@ -13,7 +13,8 @@ def main():
     im1 = convert_to_gray(im1)
     im2 = convert_to_gray(im2)
     im1 = crop_image_gui(im1)
-    im1, im2 = match_sizes(im1, im2)
+    x, y, w, h = align_frame_gui(im1, im2)
+    im2 = im2[y:y+h, x:x+w]
     out = diff_img(img1=im1, img2=im2)
     out = gauss_blur(out, GAUSSIAN_KERNEL_SIZE)
     write_im_output("wunk.png", out)
@@ -63,10 +64,93 @@ def convert_to_gray(img):
 def write_im_output(fn, img):
     cv.imwrite(OUTPUT / fn, img)
 
+def select_roi_gui(img, window_name="Select Frame"):
+    """Let the user draw a rectangle on img. Returns (x, y, w, h)."""
+    x, y, w, h = cv.selectROI(window_name, img, fromCenter=False, showCrosshair=True)
+    cv.destroyWindow(window_name)
+    return int(x), int(y), int(w), int(h)
+
 def crop_image_gui(img):
-    x, y, w, h = cv.selectROI("Select Frame", img, fromCenter=False, showCrosshair=True)
-    ret = img[int(y):int(y+h), int(x):int(x+w)]
-    return ret
+    x, y, w, h = select_roi_gui(img)
+    return img[y:y+h, x:x+w]
+
+def align_frame_gui(patch, target_img, alpha=0.5, window_name="Align Frame"):
+    """
+    Overlay a translucent copy of `patch` (same size) on top of target_img and
+    let the user drag it into place, so the corresponding region of
+    target_img can be cropped to match.
+
+    Controls: drag with the left mouse button, or nudge with W/A/S/D.
+    Enter/Space confirms the current position, Esc cancels (keeps the
+    starting position, which is centered on target_img).
+
+    Returns (x, y, w, h) of the chosen region in target_img, where (w, h)
+    matches patch's size (clamped to target_img's bounds if patch is larger).
+    """
+    h_patch, w_patch = patch.shape[:2]
+    h_img, w_img = target_img.shape[:2]
+    w_patch = min(w_patch, w_img)
+    h_patch = min(h_patch, h_img)
+    patch = patch[:h_patch, :w_patch]
+
+    # top-left corner of the patch on the target image, start centered
+    pos = [max(0, (w_img - w_patch) // 2), max(0, (h_img - h_patch) // 2)]
+    state = {"dragging": False, "drag_offset": (0, 0)}
+
+    def clamp(p):
+        p[0] = min(max(0, p[0]), w_img - w_patch)
+        p[1] = min(max(0, p[1]), h_img - h_patch)
+
+    def on_mouse(event, mx, my, flags, userdata):
+        if event == cv.EVENT_LBUTTONDOWN:
+            if pos[0] <= mx <= pos[0] + w_patch and pos[1] <= my <= pos[1] + h_patch:
+                state["dragging"] = True
+                state["drag_offset"] = (mx - pos[0], my - pos[1])
+        elif event == cv.EVENT_MOUSEMOVE and state["dragging"]:
+            pos[0] = mx - state["drag_offset"][0]
+            pos[1] = my - state["drag_offset"][1]
+            clamp(pos)
+        elif event == cv.EVENT_LBUTTONUP:
+            state["dragging"] = False
+
+    def to_bgr(im):
+        return cv.cvtColor(im, cv.COLOR_GRAY2BGR) if im.ndim == 2 else im
+
+    target_bgr = to_bgr(target_img)
+    patch_bgr = to_bgr(patch)
+
+    cv.namedWindow(window_name)
+    cv.setMouseCallback(window_name, on_mouse)
+
+    step = 1
+    confirmed_pos = tuple(pos)
+    while True:
+        canvas = target_bgr.copy()
+        x, y = pos
+        roi = canvas[y:y+h_patch, x:x+w_patch]
+        blended = cv.addWeighted(roi, 1 - alpha, patch_bgr, alpha, 0)
+        canvas[y:y+h_patch, x:x+w_patch] = blended
+        cv.rectangle(canvas, (x, y), (x + w_patch, y + h_patch), (0, 255, 0), 1)
+        cv.imshow(window_name, canvas)
+
+        key = cv.waitKey(20) & 0xFF
+        if key in (13, 32):  # Enter or Space confirms
+            confirmed_pos = tuple(pos)
+            break
+        elif key == 27:  # Esc cancels
+            break
+        elif key == ord('w'):
+            pos[1] -= step; clamp(pos)
+        elif key == ord('s'):
+            pos[1] += step; clamp(pos)
+        elif key == ord('a'):
+            pos[0] -= step; clamp(pos)
+        elif key == ord('d'):
+            pos[0] += step; clamp(pos)
+
+    cv.destroyWindow(window_name)
+    x, y = confirmed_pos
+    return x, y, w_patch, h_patch
 
 def match_sizes(image1:MatLike, image2:MatLike):
     im1_dim = image1.shape
